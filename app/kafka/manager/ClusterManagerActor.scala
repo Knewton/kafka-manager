@@ -16,7 +16,8 @@ import org.apache.curator.framework.recipes.cache.PathChildrenCache
 import org.apache.curator.framework.recipes.cache.PathChildrenCache.StartMode
 import org.apache.curator.framework.recipes.locks.InterProcessSemaphoreMutex
 import org.apache.zookeeper.CreateMode
-import kafka.manager.utils.{AdminUtils, TopicAndPartition}
+import kafka.common.TopicAndPartition
+import kafka.manager.utils.AdminUtils
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration.FiniteDuration
