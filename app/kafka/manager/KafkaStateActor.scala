@@ -200,7 +200,8 @@ class KafkaStateActor(curator: CuratorFramework,
     Broker(id.id, id.host, id.port)
   }
 
-  // Get the latest offsets for the partitions described in the states map, based off of the GetOffsetShell tool
+  // Get the latest offsets for the partitions described in the states map,
+  // Code based off of the GetOffsetShell tool in kafka.tools, kafka 0.8.2.1
   private def getPartitionOffsets(topic: String, states: Map[String, String]) : Seq[Option[Long]] = {
     val clientId = "partitionOffsetGetter"
     val targetBrokers : IndexedSeq[Broker] = getBrokers.map(brokerIdentity2Broker)
