@@ -130,7 +130,7 @@ object ActorModel {
   case class TopicDescription(topic: String,
                               description: (Int,String),
                               partitionState: Option[Map[String, String]],
-                              partitionOffsets : Seq[Option[Long]],
+                              partitionOffsets : Option[Map[Int, Option[Long]]],
                               config:Option[(Int,String)],
                               deleteSupported: Boolean) extends  QueryResponse
   case class TopicDescriptions(descriptions: IndexedSeq[TopicDescription], lastUpdateMillis: Long) extends QueryResponse
@@ -281,7 +281,10 @@ object ActorModel {
       val tpi : Map[Int,TopicPartitionIdentity] = partMap.map { case (partition, replicas) =>
         (partition.toInt,TopicPartitionIdentity.from(partition.toInt,
                                                      stateMap.get(partition),
-                                                     td.partitionOffsets(partition.toInt),
+                                                     td.partitionOffsets match {
+                                                       case Some(set) => set.getOrElse(partition.toInt, None)
+                                                       case None => None
+                                                     },
                                                      replicas))
       }
       val config : (Int,Map[String, String]) = {

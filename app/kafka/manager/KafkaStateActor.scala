@@ -180,7 +180,7 @@ class KafkaStateActor(curator: CuratorFramework,
       }
       partitionOffsets = getPartitionOffsets(topic, states)
       config = getTopicConfigString(topic)
-    } yield TopicDescription(topic, description, Option(states), partitionOffsets, config, deleteSupported)
+    } yield TopicDescription(topic, description, Option(states), Some(partitionOffsets), config, deleteSupported)
   }
 
   override def processActorResponse(response: ActorResponse): Unit = {
@@ -202,7 +202,7 @@ class KafkaStateActor(curator: CuratorFramework,
 
   // Get the latest offsets for the partitions described in the states map,
   // Code based off of the GetOffsetShell tool in kafka.tools, kafka 0.8.2.1
-  private def getPartitionOffsets(topic: String, states: Map[String, String]) : Seq[Option[Long]] = {
+  private def getPartitionOffsets(topic: String, states: Map[String, String]) : Map[Int,Option[Long]] = {
     val clientId = "partitionOffsetGetter"
     val targetBrokers : IndexedSeq[Broker] = getBrokers.map(brokerIdentity2Broker)
     val time = -1
@@ -222,7 +222,7 @@ class KafkaStateActor(curator: CuratorFramework,
     } yield (partition, leader)
 
     // Get the latest offset for each partition
-    for {
+    val partitionToOffset = for {
       (partitionId, optLeader) <- partitionsWithLeaders.sortBy(_._1)
       partitionOffset: Option[Long] = optLeader match {
         case Some(leader) =>
@@ -230,10 +230,11 @@ class KafkaStateActor(curator: CuratorFramework,
           val topicAndPartition = TopicAndPartition(topic, partitionId)
           val request = OffsetRequest(Map(topicAndPartition -> PartitionOffsetRequestInfo(time, nOffsets)))
           val offsets = consumer.getOffsetsBefore(request).partitionErrorAndOffsets(topicAndPartition).offsets
-          Some(offsets.head)
+          offsets.headOption
         case None => None
       }
-    } yield partitionOffset
+    } yield (partitionId, partitionOffset)
+    partitionToOffset.toMap
   }
 
   private[this] def getBrokers : IndexedSeq[BrokerIdentity] = {
