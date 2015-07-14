@@ -204,7 +204,7 @@ class KafkaStateActor(curator: CuratorFramework,
   // Get the latest offsets for the partitions described in the states map, based off of the GetOffsetShell tool
   private def getPartitionOffsets(topic: String, states: Map[String, String]) : Seq[Option[Long]] = {
     val clientId = "partitionOffsetGetter"
-    val targetBrokers : IndexedSeq[Broker] = getBrokers().map(brokerIdentity2Broker)
+    val targetBrokers : IndexedSeq[Broker] = getBrokers.map(brokerIdentity2Broker)
     val time = -1
     val nOffsets = 1
     val maxWaitMs = 1000
@@ -236,7 +236,7 @@ class KafkaStateActor(curator: CuratorFramework,
     } yield partitionOffset
   }
 
-  private[this] def getBrokers() : IndexedSeq[BrokerIdentity] = {
+  private[this] def getBrokers : IndexedSeq[BrokerIdentity] = {
     val data: mutable.Buffer[ChildData] = brokersPathCache.getCurrentData.asScala
     data.map { cd =>
       BrokerIdentity.from(nodeFromPath(cd.getPath).toInt, asString(cd.getData))
@@ -299,7 +299,7 @@ class KafkaStateActor(curator: CuratorFramework,
         sender ! topicsTreeCacheLastUpdateMillis
 
       case KSGetBrokers =>
-        sender ! BrokerList(getBrokers(), clusterConfig)
+        sender ! BrokerList(getBrokers, clusterConfig)
 
       case KSGetPreferredLeaderElection =>
         sender ! preferredLeaderElection
