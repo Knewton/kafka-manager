@@ -220,7 +220,7 @@
                     @for((_,tpi) <- topicIdentity.partitionsIdentity.toIndexedSeq.sortBy(_._2.partNum)) {
                     <tr>
                         <td>@tpi.partNum</td>
-                        <td>@tpi.logSize</td>
+                        <td>@tpi.latestOffset.getOrElse(" ")</td>
                         <td class="@getPartitionLeaderLevel(tpi.leader)">
                             <a href="@routes.Application.broker(cluster,tpi.leader)">@tpi.leader</a>
                         </td>

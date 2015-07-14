@@ -5,6 +5,10 @@
 
 package kafka.manager
 
+import kafka.api.{PartitionOffsetRequestInfo, OffsetRequest}
+import kafka.client.ClientUtils
+import kafka.consumer.SimpleConsumer
+import kafka.cluster.Broker
 import kafka.common.TopicAndPartition
 import kafka.manager.utils.zero81.{ReassignPartitionCommand, PreferredReplicaLeaderElectionCommand}
 import org.apache.curator.framework.recipes.cache.PathChildrenCache.StartMode
@@ -175,7 +179,7 @@ class KafkaStateActor(curator: CuratorFramework,
         val statePath = s"$partitionsPath/$part/state"
         Option(topicsTreeCache.getCurrentData(statePath)).map(cd => (part, asString(cd.getData)))
       }
-      partitionOffsets = getPartitionOffsets(states)
+      partitionOffsets = getPartitionOffsets(topic, states)
       config = getTopicConfigString(topic)
     } yield TopicDescription(topic, description, Option(states), partitionOffsets, config, deleteSupported)
   }
@@ -192,10 +196,44 @@ class KafkaStateActor(curator: CuratorFramework,
     result.map(cd => (cd.getStat.getVersion,asString(cd.getData)))
   }
 
+  // conversion between BrokerIdentity and the kafka library's broker case class
+  implicit def brokerIdentity2Broker(id : BrokerIdentity) : Broker = {
+    Broker(id.id, id.host, id.port)
+  }
+
   // Get the latest offsets for the partitions described in the states map, based off of the GetOffsetShell tool
-  private def getPartitionOffsets(states: Map[String, String]) : Option[Seq[Long]] = {
-    //TODO - add call to kafka
-    None
+  private def getPartitionOffsets(topic: String, states: Map[String, String]) : Seq[Option[Long]] = {
+    val clientId = "partitionOffsetGetter"
+    val targetBrokers : IndexedSeq[Broker] = getBrokers().map(brokerIdentity2Broker)
+    val time = -1
+    val nOffsets = 1
+    val maxWaitMs = 1000
+
+    // Get partition leader broker information
+    import org.json4s.jackson.JsonMethods.parse
+    import org.json4s.scalaz.JsonScalaz.field
+    val partitionsWithLeaders : List[(Int, Option[Broker])] = for {
+      (part, state) <- states.toList
+      partition = part.toInt
+      descJson = parse(state)
+      leaderID = field[Int]("leader")(descJson).fold({ e =>
+        log.error(s"[topic=$topic] Failed to get partitions from topic json $state"); 0}, identity)
+      leader = targetBrokers.find(_.id == leaderID)
+    } yield (partition, leader)
+
+    // Get the latest offset for each partition
+    for {
+      (partitionId, optLeader) <- partitionsWithLeaders.sortBy(_._1)
+      partitionOffset: Option[Long] = optLeader match {
+        case Some(leader) =>
+          val consumer = new SimpleConsumer(leader.host, leader.port, 10000, 100000, clientId)
+          val topicAndPartition = TopicAndPartition(topic, partitionId)
+          val request = OffsetRequest(Map(topicAndPartition -> PartitionOffsetRequestInfo(time, nOffsets)))
+          val offsets = consumer.getOffsetsBefore(request).partitionErrorAndOffsets(topicAndPartition).offsets
+          Some(offsets.head)
+        case None => None
+      }
+    } yield partitionOffset
   }
 
   private[this] def getBrokers() : IndexedSeq[BrokerIdentity] = {
