@@ -214,7 +214,7 @@
                 <div class="panel-heading"><h4>Partition Information</h4></div>
                 <table class="table">
                     <thead>
-                    <tr><th>Partition</th><th>Logsize</th><th>Leader</th><th>Replicas</th><th>In Sync Replicas</th><th>Preferred Leader?</th><th>Under Replicated?</th></tr>
+                    <tr><th>Partition</th><th>Latest Offset</th><th>Leader</th><th>Replicas</th><th>In Sync Replicas</th><th>Preferred Leader?</th><th>Under Replicated?</th></tr>
                     </thead>
                     <tbody>
                     @for((_,tpi) <- topicIdentity.partitionsIdentity.toIndexedSeq.sortBy(_._2.partNum)) {
