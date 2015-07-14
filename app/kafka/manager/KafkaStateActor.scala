@@ -6,7 +6,6 @@
 package kafka.manager
 
 import kafka.api.{PartitionOffsetRequestInfo, OffsetRequest}
-import kafka.client.ClientUtils
 import kafka.consumer.SimpleConsumer
 import kafka.cluster.Broker
 import kafka.common.TopicAndPartition
