@@ -5,12 +5,16 @@
 
 package kafka.manager
 
+import kafka.api.{PartitionOffsetRequestInfo, OffsetRequest}
+import kafka.consumer.SimpleConsumer
+import kafka.cluster.Broker
+import kafka.common.TopicAndPartition
 import kafka.manager.utils.zero81.{ReassignPartitionCommand, PreferredReplicaLeaderElectionCommand}
 import org.apache.curator.framework.recipes.cache.PathChildrenCache.StartMode
 import org.apache.curator.framework.recipes.cache._
 import org.apache.curator.framework.CuratorFramework
 import org.joda.time.{DateTimeZone, DateTime}
-import kafka.manager.utils.{TopicAndPartition, ZkUtils}
+import kafka.manager.utils.ZkUtils
 
 import scala.collection.mutable
 import scala.util.{Success, Failure, Try}
@@ -174,8 +178,9 @@ class KafkaStateActor(curator: CuratorFramework,
         val statePath = s"$partitionsPath/$part/state"
         Option(topicsTreeCache.getCurrentData(statePath)).map(cd => (part, asString(cd.getData)))
       }
+      partitionOffsets = getPartitionOffsets(topic, states)
       config = getTopicConfigString(topic)
-    } yield TopicDescription(topic, description, Option(states),config, deleteSupported)
+    } yield TopicDescription(topic, description, Option(states), Some(partitionOffsets), config, deleteSupported)
   }
 
   override def processActorResponse(response: ActorResponse): Unit = {
@@ -188,6 +193,64 @@ class KafkaStateActor(curator: CuratorFramework,
     val data: mutable.Buffer[ChildData] = topicsConfigPathCache.getCurrentData.asScala
     val result: Option[ChildData] = data.find(p => p.getPath.endsWith(topic))
     result.map(cd => (cd.getStat.getVersion,asString(cd.getData)))
+  }
+
+  // conversion between BrokerIdentity and the kafka library's broker case class
+  implicit def brokerIdentity2Broker(id : BrokerIdentity) : Broker = {
+    Broker(id.id, id.host, id.port)
+  }
+
+  // Get the latest offsets for the partitions described in the states map,
+  // Code based off of the GetOffsetShell tool in kafka.tools, kafka 0.8.2.1
+  private def getPartitionOffsets(topic: String, states: Map[String, String]) : Map[Int,Option[Long]] = {
+    val clientId = "partitionOffsetGetter"
+    val targetBrokers : IndexedSeq[Broker] = getBrokers.map(brokerIdentity2Broker)
+    val time = -1
+    val nOffsets = 1
+    val maxWaitMs = 1000
+
+    // Get partition leader broker information
+    import org.json4s.jackson.JsonMethods.parse
+    import org.json4s.scalaz.JsonScalaz.field
+    val partitionsWithLeaders : List[(Int, Option[Broker])] = for {
+      (part, state) <- states.toList
+      partition = part.toInt
+      descJson = parse(state)
+      leaderID = field[Int]("leader")(descJson).fold({ e =>
+        log.error(s"[topic=$topic] Failed to get partitions from topic json $state"); 0}, identity)
+      leader = targetBrokers.find(_.id == leaderID)
+    } yield (partition, leader)
+
+    // Get the latest offset for each partition
+    val partitionToOffset = for {
+      (partitionId, optLeader) <- partitionsWithLeaders.sortBy(_._1)
+      partitionOffset: Option[Long] = optLeader match {
+        case Some(leader) =>
+          val consumer = new SimpleConsumer(leader.host, leader.port, 10000, 100000, clientId)
+          val topicAndPartition = TopicAndPartition(topic, partitionId)
+          val request = OffsetRequest(Map(topicAndPartition -> PartitionOffsetRequestInfo(time, nOffsets)))
+          val offsets = consumer.getOffsetsBefore(request).partitionErrorAndOffsets(topicAndPartition).offsets
+          offsets.headOption
+        case None => None
+      }
+    } yield (partitionId, partitionOffset)
+    partitionToOffset.toMap
+  }
+
+  private[this] def getBrokers : IndexedSeq[BrokerIdentity] = {
+    val data: mutable.Buffer[ChildData] = brokersPathCache.getCurrentData.asScala
+    data.map { cd =>
+      BrokerIdentity.from(nodeFromPath(cd.getPath).toInt, asString(cd.getData))
+    }.filter { v =>
+      v match {
+        case scalaz.Failure(nel) =>
+          log.error(s"Failed to parse broker config $nel")
+          false
+        case _ => true
+      }
+    }.collect {
+      case scalaz.Success(bi) => bi
+    }.toIndexedSeq.sortBy(_.id)
   }
 
   override def processQueryRequest(request: QueryRequest): Unit = {
@@ -237,20 +300,7 @@ class KafkaStateActor(curator: CuratorFramework,
         sender ! topicsTreeCacheLastUpdateMillis
 
       case KSGetBrokers =>
-        val data: mutable.Buffer[ChildData] = brokersPathCache.getCurrentData.asScala
-        val result: IndexedSeq[BrokerIdentity] = data.map { cd =>
-          BrokerIdentity.from(nodeFromPath(cd.getPath).toInt, asString(cd.getData))
-        }.filter { v =>
-          v match {
-            case scalaz.Failure(nel) =>
-              log.error(s"Failed to parse broker config $nel")
-              false
-            case _ => true
-          }
-        }.collect { 
-          case scalaz.Success(bi) => bi
-        }.toIndexedSeq.sortBy(_.id)
-        sender ! BrokerList(result, clusterConfig)
+        sender ! BrokerList(getBrokers, clusterConfig)
 
       case KSGetPreferredLeaderElection =>
         sender ! preferredLeaderElection
