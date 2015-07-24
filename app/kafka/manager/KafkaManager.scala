@@ -14,6 +14,7 @@ import com.typesafe.config.{ConfigFactory, Config}
 import kafka.manager.ActorModel._
 import org.slf4j.{LoggerFactory, Logger}
 
+import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
@@ -22,8 +23,13 @@ import scala.util.{Success, Failure, Try}
 /**
  * @author hiral
  */
-case class TopicListExtended(list: IndexedSeq[(String, Option[TopicIdentity])], deleteSet: Set[String], underReassignments: IndexedSeq[String])
-case class BrokerListExtended(list: IndexedSeq[BrokerIdentity], metrics: Map[Int,BrokerMetrics], combinedMetric: Option[BrokerMetrics], clusterConfig: ClusterConfig)
+case class TopicListExtended(list: IndexedSeq[(String, Option[TopicIdentity])],
+                             deleteSet: Set[String],
+                             underReassignments: IndexedSeq[String])
+case class BrokerListExtended(list: IndexedSeq[BrokerIdentity],
+                              metrics: Map[Int,BrokerMetrics],
+                              combinedMetric: Option[BrokerMetrics],
+                              clusterConfig: ClusterConfig)
 case class ApiError(msg: String)
 object ApiError {
   private[this] val log : Logger = LoggerFactory.getLogger(classOf[ApiError])
@@ -214,6 +220,28 @@ class KafkaManager(akkaConfig: Config)
       )
     ) { result: Future[CMCommandResult] =>
       result.map(cmr => toDisjunction(cmr.result))
+    }
+  }
+
+  def manualPartitionAssignments( clusterName: String,
+                                  assignments: List[(String, List[(Int, List[Int])])]) = {
+    implicit val ec = apiExecutionContext
+    val results = tryWithKafkaManagerActor(
+      KMClusterCommandRequest (
+        clusterName,
+        CMManualPartitionAssignments(assignments)
+      )
+    ) { result: CMCommandResults =>
+      val errors = result.result.collect { case Failure(t) => ApiError(t.getMessage)}
+      if (errors.isEmpty)
+        \/-({})
+      else
+        -\/(errors)
+    }
+
+    results.map {
+      case -\/(e) => -\/(IndexedSeq(e))
+      case \/-(lst) => lst
     }
   }
 
@@ -410,6 +438,17 @@ class KafkaManager(akkaConfig: Config)
         }
       })
     }
+  }
+
+  def getBrokersView(clusterName: String): Future[\/[ApiError, Seq[BVView]]] = {
+    implicit val ec = apiExecutionContext
+
+    tryWithKafkaManagerActor(
+      KMClusterQueryRequest(
+        clusterName,
+        BVGetViews
+      )
+    )(identity[Seq[BVView]])
   }
 
   def getBrokerView(clusterName: String, brokerId: Int): Future[ApiError \/ BVView] = {
