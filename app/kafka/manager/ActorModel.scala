@@ -364,13 +364,14 @@ object ActorModel {
 
   case class ConsumedTopicState(consumerGroup: String,
                                 topic: String,
+                                numPartitions: Int,
                                 partitionLatestOffsets: Map[Int, Option[Long]],
                                 partitionOwners: Map[Int, String],
                                 partitionOffsets: Map[Int, Long]) extends QueryResponse {
     lazy val totalLag : Option[Long] = {
       // only defined if every partition has a latest offset
       val actualOffsets = partitionLatestOffsets.values.collect{case Some(x:Long) => x}
-      if (actualOffsets.size == partitionLatestOffsets.size) {
+      if (actualOffsets.size == numPartitions && partitionLatestOffsets.size == numPartitions) {
           Some(actualOffsets.sum - partitionOffsets.values.sum)
       } else None
     }
@@ -383,14 +384,9 @@ object ActorModel {
     }
 
     // Percentage of the partitions that have an owner
-    def percentageCovered : Option[Int] = {
-      if (partitionOwners.isEmpty) {
-        None
-      } else {
-        val numCovered = partitionOwners.size
-        val numPartitions = partitionOwners.keys.max+1
-        Some(100 * numCovered / numPartitions)
-      }
+    def percentageCovered : Int = {
+      val numCovered = partitionOwners.size
+      100 * numCovered / numPartitions
     }
   }
 

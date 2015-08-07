@@ -244,12 +244,18 @@ class KafkaStateActor(curator: CuratorFramework,
       owners : Map[Int, String] = ownersByPartition map { case (part, data) => (part.toInt, asString(data.getData)) }
     } yield owners
 
-    val topicPartitionOffsets = getTopicDescription(topic).map(_.partitionOffsets).getOrElse(Map.empty[Int, Option[Long]])
+    val optTopic = getTopicDescription(topic)
+    val topicPartitionOffsets = optTopic.map(_.partitionOffsets).getOrElse(Map.empty[Int, Option[Long]])
+    // get number of partitions
+
+    val numPartitions: Int = math.max(optTopic.flatMap(_.partitionState.map(_.size)).getOrElse(0),
+                                      partitionOffsets.map(_.size).getOrElse(0))
 
     // Only return a valid ConsumedTopicState if there is state associated with the topic under the consumer
     if (partitionOffsets.isDefined || partitionOwners.isDefined) {
       Some(ConsumedTopicState(consumer,
                               topic,
+                              numPartitions,
                               topicPartitionOffsets,
                               partitionOwners.getOrElse(Map.empty),
                               partitionOffsets.getOrElse(Map.empty)))
