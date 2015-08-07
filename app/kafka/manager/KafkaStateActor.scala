@@ -218,21 +218,22 @@ class KafkaStateActor(curator: CuratorFramework,
     val offsetPath = "%s/%s/%s".format(ZkUtils.ConsumersPath,consumer,"offsets")
     val topicOffsetOption : Option[Map[String, ChildData]] = Option(consumersTreeCache.getCurrentChildren(offsetPath)).map(_.asScala.toMap)
 
-
-    val topicDescriptions: Option[Map[String, ConsumedTopicDescription]] =
-      topicOffsetOption.map[List[(String, ConsumedTopicDescription)]] { topics: Map[String, ChildData] =>
-      for {
-        topicAndData: (String, ChildData) <- topics.toList
-        topicDesc = getConsumedTopicDescription(consumer, topicAndData._1)
-      } yield (topicAndData._1, topicDesc)
-    }.map(_.toMap)
+    val topicDescriptions: Option[Map[String, ConsumedTopicState]] =
+      topicOffsetOption.map[Map[String, ConsumedTopicState]] { _.keys map {
+          topic => (topic, getConsumedTopicState(consumer, topic))
+        } collect {
+          case (topic: String, Some(state: ConsumedTopicState)) => (topic, state)
+        } toMap
+      }
 
     topicDescriptions.map(ConsumerDescription(consumer, _))
   }
 
-  private[this] def getConsumedTopicDescription(consumer:String, topic:String) : ConsumedTopicDescription = {
+  private[this] def getConsumedTopicState(consumer:String, topic:String) : Option[ConsumedTopicState] = {
     val offsetPath = "%s/%s/%s/%s".format(ZkUtils.ConsumersPath, consumer, "offsets", topic)
     val ownerPath = "%s/%s/%s/%s".format(ZkUtils.ConsumersPath, consumer, "owners", topic)
+
+    // There might not be topics listed, so we have to take the Option into account
     val partitionOffsets: Option[Map[Int, Long]] = for {
       offsetsByPartition: Map[String, ChildData] <- Option(consumersTreeCache.getCurrentChildren(offsetPath)).map(_.asScala.toMap)
       offsets : Map[Int, Long] = offsetsByPartition map {case (part, data) => (part.toInt, asString(data.getData).toLong)}
@@ -243,8 +244,18 @@ class KafkaStateActor(curator: CuratorFramework,
       owners : Map[Int, String] = ownersByPartition map { case (part, data) => (part.toInt, asString(data.getData)) }
     } yield owners
 
-    val topicDescription = getTopicDescription(topic)
-    ConsumedTopicDescription(consumer, topic, topicDescription, partitionOwners, partitionOffsets)
+    val topicPartitionOffsets = getTopicDescription(topic).map(_.partitionOffsets).getOrElse(Map.empty[Int, Option[Long]])
+
+    // Only return a valid ConsumedTopicState if there is state associated with the topic under the consumer
+    if (partitionOffsets.isDefined || partitionOwners.isDefined) {
+      Some(ConsumedTopicState(consumer,
+                              topic,
+                              topicPartitionOffsets,
+                              partitionOwners.getOrElse(Map.empty),
+                              partitionOffsets.getOrElse(Map.empty)))
+    } else {
+      None
+    }
   }
 
   override def processActorResponse(response: ActorResponse): Unit = {
@@ -355,8 +366,8 @@ class KafkaStateActor(curator: CuratorFramework,
       case KSGetConsumerDescription(consumer) =>
         sender ! getConsumerDescription(consumer)
 
-      case KSGetConsumedTopicDescription(consumer, topic) =>
-        sender ! getConsumedTopicDescription(consumer,topic)
+      case KSGetConsumedTopicState(consumer, topic) =>
+        sender ! getConsumedTopicState(consumer,topic)
 
       case KSGetConsumerDescriptions(consumers) =>
         sender ! ConsumerDescriptions(consumers.toIndexedSeq.map(getConsumerDescription).flatten, consumersTreeCacheLastUpdateMillis)
