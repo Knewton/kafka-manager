@@ -30,6 +30,7 @@ import org.apache.zookeeper.data.Stat
  * https://git-wip-us.apache.org/repos/asf?p=kafka.git;a=blob;f=core/src/main/scala/kafka/utils/ZkUtils.scala
  */
 object ZkUtils {
+
   val ConsumersPath = "/consumers"
   val BrokerIdsPath = "/brokers/ids"
   val BrokerTopicsPath = "/brokers/topics"
@@ -104,6 +105,19 @@ object ZkUtils {
     val stat: Stat = new Stat()
     val dataStr: String = curator.getData.storingStatIn(stat).forPath(path)
     (dataStr, stat)
+  }
+  
+  def readDataMaybeNull(curator: CuratorFramework, path: String): (Option[String], Stat) = {
+    val stat: Stat = new Stat()
+    try {
+      val dataStr: String = curator.getData.storingStatIn(stat).forPath(path)
+      (Option(dataStr), stat)
+    } catch {
+      case e: NoNodeException => {
+        (None, stat)
+      }
+      case e2: Throwable => throw e2
+    }
   }
 
 

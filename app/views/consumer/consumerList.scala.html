@@ -3,10 +3,12 @@
 * See accompanying LICENSE file.
 *@
 @import scalaz.{\/}
-@(cluster:String, errorOrConsumers: kafka.manager.ApiError \/ kafka.manager.ConsumerListExtended)
+@(cluster:String, errorOrConsumers: kafka.manager.ApiError \/ kafka.manager.ConsumerListExtended
+)(implicit af: features.ApplicationFeatures, messages: play.api.i18n.Messages, menus: models.navigation.Menus)
 
 @theMenu = {
-    @views.html.navigation.clusterMenu(cluster,"Consumer","List",models.navigation.Menus.clusterMenus(cluster))
+    @views.html.navigation.clusterMenu(cluster,"Consumer","List",menus.clusterMenus(cluster)(
+        errorOrConsumers.toOption.map(_.clusterContext.clusterFeatures).getOrElse(kafka.manager.features.ClusterFeatures.default)))
 }
 
 @consumerScripts = {
@@ -27,7 +29,7 @@
             <div class="panel-heading"><h3>Consumers</h3></div>
             @errorOrConsumers.fold(
                 views.html.errors.onApiError(_),
-                cl => views.html.consumer.consumerListContent(cluster,cl.list))
+                cl => views.html.consumer.consumerListContent(cluster,cl.list,cl.clusterContext))
         </div>
     </div>
 }

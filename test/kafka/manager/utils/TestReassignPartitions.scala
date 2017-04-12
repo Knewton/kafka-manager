@@ -6,8 +6,11 @@ package kafka.manager.utils
 
 import java.util.Properties
 
-import kafka.manager.ActorModel._
-import kafka.manager.{ClusterConfig, Kafka_0_8_2_0}
+import kafka.manager.BaseTest
+import kafka.manager.model.ActorModel
+import ActorModel._
+import kafka.manager.features.ClusterFeatures
+import kafka.manager.model.{ClusterContext, ClusterConfig, Kafka_0_8_2_0}
 import kafka.manager.utils.zero81._
 import org.apache.zookeeper.data.Stat
 
@@ -16,7 +19,7 @@ import scala.concurrent.Future
 /**
  * @author hiral
  */
-class TestReassignPartitions extends CuratorAwareTest {
+class TestReassignPartitions extends CuratorAwareTest with BaseTest {
 
   import ReassignPartitionErrors._
 
@@ -24,10 +27,11 @@ class TestReassignPartitions extends CuratorAwareTest {
   
   private[this] val reassignPartitionCommand = new ReassignPartitionCommand(adminUtils)
 
-  private[this] val brokerList = IndexedSeq(1,2,3)
+  private[this] val brokerList = Set(1,2,3)
 
-  private[this] val defaultClusterConfig = ClusterConfig("test","0.8.2.0","localhost:2818",100,false,true)
-  
+  private[this] val defaultClusterConfig = ClusterConfig("test","0.8.2.0","localhost:2818",100,false, pollConsumers = true, filterConsumers = true, jmxUser = None, jmxPass = None, jmxSsl = false, tuning = Option(defaultTuning))
+  private[this] val defaultClusterContext = ClusterContext(ClusterFeatures.from(defaultClusterConfig), defaultClusterConfig)
+
   private[this] def mytopic1 : TopicIdentity = getTopicIdentity("mytopic1")
   private[this] def mytopic2 : TopicIdentity = getTopicIdentity("mytopic2")
   private[this] def mytopic3 : TopicIdentity = getTopicIdentity("mytopic3")
@@ -49,14 +53,14 @@ class TestReassignPartitions extends CuratorAwareTest {
       val json : String = curator.getData.storingStatIn(stat).forPath(ZkUtils.getTopicPath(topic))
       val configStat = new Stat
       val configJson : String = curator.getData.storingStatIn(configStat).forPath(ZkUtils.getTopicConfigPath(topic))
-      val td: TopicDescription = TopicDescription(topic,(stat.getVersion,json),None,Future.successful(Map.empty),Option((configStat.getVersion,configJson)),false)
-      TopicIdentity.from(brokerList.size,td,None, defaultClusterConfig)
+      val td: TopicDescription = TopicDescription(topic,(stat.getVersion,json),None,Future.successful(PartitionOffsetsCapture.EMPTY),Option((configStat.getVersion,configJson)))
+      TopicIdentity.from(brokerList.size,td,None,None,defaultClusterContext,None)
     }
   }
 
   test("reassign partitions with empty set") {
     withCurator { curator =>
-      assert(reassignPartitionCommand.executeAssignment(curator,Map.empty, Map.empty).isFailure)
+      assert(reassignPartitionCommand.executeAssignment(curator,Map.empty, Map.empty, Set.empty).isFailure)
       assert(curator.checkExists().forPath(ZkUtils.ReassignPartitionsPath) == null)
     }
   }
@@ -71,7 +75,7 @@ class TestReassignPartitions extends CuratorAwareTest {
             td.copy(partitions = td.partitions - 1, partitionsIdentity = td.partitionsIdentity - (td.partitions - 1))).get)
         }
 
-        reassignPartitionCommand.executeAssignment(curator,current,generated).get
+        reassignPartitionCommand.executeAssignment(curator,current,generated, Set.empty).get
       }
     }
   }
@@ -86,7 +90,7 @@ class TestReassignPartitions extends CuratorAwareTest {
             td.copy(partitionsIdentity = td.partitionsIdentity.map { case (p,l) => (p, l.copy(replicas = l.replicas.drop(1)))})).get)
         }
 
-        reassignPartitionCommand.executeAssignment(curator,current,generated).get
+        reassignPartitionCommand.executeAssignment(curator,current,generated, Set.empty).get
       }
     }
   }
@@ -100,7 +104,7 @@ class TestReassignPartitions extends CuratorAwareTest {
           td).get)
       }
 
-      assert(reassignPartitionCommand.executeAssignment(curator,current,generated).isSuccess)
+      assert(reassignPartitionCommand.executeAssignment(curator,current,generated, Set.empty).isSuccess)
     }
   }
 
@@ -114,7 +118,7 @@ class TestReassignPartitions extends CuratorAwareTest {
             td).get)
         }
 
-        reassignPartitionCommand.executeAssignment(curator,current,generated).get
+        reassignPartitionCommand.executeAssignment(curator,current,generated, Set.empty).get
       }
     }
   }
